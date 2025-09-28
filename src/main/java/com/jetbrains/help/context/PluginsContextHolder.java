@@ -26,7 +26,7 @@ public class PluginsContextHolder {
 
     private static final String PLUGIN_BASIC_URL = "https://plugins.jetbrains.com";
 
-    private static final String PLUGIN_LIST_URL = PLUGIN_BASIC_URL + "/api/searchPlugins?max=10000&offset=0&orderBy=name";
+    private static final String PLUGIN_LIST_URL = PLUGIN_BASIC_URL + "/api/searchPlugins?max=20&orderBy=name";
 
     private static final String PLUGIN_INFO_URL = PLUGIN_BASIC_URL + "/api/plugins/";
 
@@ -88,19 +88,55 @@ public class PluginsContextHolder {
     }
 
     public static PluginList pluginList() {
-        return HttpUtil.createGet(PLUGIN_LIST_URL)
-                .thenFunction(response -> {
-                    try (InputStream is = response.bodyStream()) {
-                        if (!response.isOk()) {
-                            throw new IllegalArgumentException(CharSequenceUtil.format("{} 请求失败! = {}", PLUGIN_LIST_URL, response));
-                        }
-                        PluginList pluginList = JSONUtil.toBean(IoUtil.readUtf8(is), PluginList.class);
-                        log.info("获取大小 => [{}]", pluginList.getTotal());
-                        return pluginList;
-                    } catch (IOException e) {
-                        throw new IllegalArgumentException(CharSequenceUtil.format("{} 请求IO读取失败!", PLUGIN_LIST_URL), e);
+        // 初始化一个空的 PluginList 用于汇总结果
+        PluginList resultPluginList = new PluginList();
+        resultPluginList.setPlugins(new ArrayList<>());
+        resultPluginList.setTotal(0L);
+
+        // 配置线程池，核心线程数
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(3);
+        // 创建一个线程池，使用并行流处理请求
+        List<CompletableFuture<PluginList>> futures = new ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            int offset = i;
+            String url = PLUGIN_LIST_URL + "&offset=" + offset;
+            CompletableFuture<PluginList> future = CompletableFuture.supplyAsync(() -> {
+                try (InputStream is = HttpUtil.createGet(url).execute().bodyStream()) {
+                    cn.hutool.http.HttpResponse response = HttpUtil.createGet(url).execute();
+                    if (!response.isOk()) {
+                        throw new IllegalArgumentException(CharSequenceUtil.format("{} 请求失败! = {}", url, response));
                     }
-                });
+                    PluginList currentPluginList = JSONUtil.toBean(IoUtil.readUtf8(is), PluginList.class);
+                    log.info("获取大小 => [{}], 当前第 => [{}] 页", 
+                            currentPluginList.getPlugins() != null ? currentPluginList.getPlugins().size() : 0, offset);
+                    return currentPluginList;
+                } catch (IOException e) {
+                    throw new IllegalArgumentException(CharSequenceUtil.format("{} 请求IO读取失败!", url), e);
+                }
+            }, executor);
+            futures.add(future);
+        }
+
+        // 等待所有请求完成
+        CompletableFuture<Void> allFutures = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        CompletableFuture<List<PluginList>> allResults = allFutures.thenApply(v -> 
+            futures.stream()
+                   .map(CompletableFuture::join)
+                   .toList()
+        );
+
+        // 汇总结果
+        allResults.join().forEach(currentPluginList -> {
+            if (currentPluginList.getPlugins() != null) {
+                resultPluginList.getPlugins().addAll(currentPluginList.getPlugins());
+                resultPluginList.setTotal(resultPluginList.getTotal() + currentPluginList.getPlugins().size());
+            }
+        });
+
+        // 关闭线程池
+        executor.shutdown();
+
+        return resultPluginList;
     }
 
     public static List<PluginList.Plugin> pluginListFilter(PluginList pluginList) {
