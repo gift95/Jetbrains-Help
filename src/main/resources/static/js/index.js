@@ -31,8 +31,8 @@ $(document).ready(function() {
 
     // Function to update preview
     window.updatePreview = function() {
-        const licenseeName = $('#licenseeName').val() || '光云';
-        const assigneeName = $('#assigneeName').val() || '藏柏';
+        const licenseeName = $('#licenseeName').val() || 'gift95';
+        const assigneeName = $('#assigneeName').val() || '野生Bug饲养员';
         const expiryDate = $('#expiryDate').val() || '2111/11/11';
 
         $('#previewLicenseName').text(licenseeName);
@@ -43,8 +43,8 @@ $(document).ready(function() {
     // Function to show license form
     window.showLicenseForm = function () {
         let licenseInfo = JSON.parse(localStorage.getItem('licenseInfo'));
-        $('#licenseeName').val(licenseInfo?.licenseeName || '光云');
-        $('#assigneeName').val(licenseInfo?.assigneeName || '藏柏');
+        $('#licenseeName').val(licenseInfo?.licenseeName || 'gift95');
+        $('#assigneeName').val(licenseInfo?.assigneeName || '野生Bug饲养员');
         $('#expiryDate').val(licenseInfo?.expiryDate || '2111-11-11');
 
         // Update preview with current values
