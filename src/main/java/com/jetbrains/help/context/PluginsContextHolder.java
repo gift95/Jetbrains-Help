@@ -6,6 +6,7 @@ import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpUtil;
+import cn.hutool.json.JSON;
 import cn.hutool.json.JSONUtil;
 import com.jetbrains.help.util.FileTools;
 import lombok.AccessLevel;
@@ -19,14 +20,16 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j(topic = "插件上下文")
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class PluginsContextHolder {
+    private static final int PAGE_SIZE = 20;
 
     private static final String PLUGIN_BASIC_URL = "https://plugins.jetbrains.com";
 
-    private static final String PLUGIN_LIST_URL = PLUGIN_BASIC_URL + "/api/searchPlugins?max=20&orderBy=name";
+    private static final String PLUGIN_LIST_URL = PLUGIN_BASIC_URL + "/api/searchPlugins?max="+PAGE_SIZE+"&orderBy=name";
 
     private static final String PLUGIN_INFO_URL = PLUGIN_BASIC_URL + "/api/plugins/";
 
@@ -92,12 +95,12 @@ public class PluginsContextHolder {
         PluginList resultPluginList = new PluginList();
         resultPluginList.setPlugins(new ArrayList<>());
         resultPluginList.setTotal(0L);
-
+        int pluginPageSize = getPluginTotleSize(resultPluginList);
         // 配置线程池，核心线程数
         java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(3);
         // 创建一个线程池，使用并行流处理请求
         List<CompletableFuture<PluginList>> futures = new ArrayList<>();
-        for (int i = 0; i < 500; i++) {
+        for (int i = 1; i < pluginPageSize; i++) {
             int offset = i;
             String url = PLUGIN_LIST_URL + "&offset=" + offset;
             CompletableFuture<PluginList> future = CompletableFuture.supplyAsync(() -> {
@@ -180,6 +183,31 @@ public class PluginsContextHolder {
                         return pluginInfo;
                     } catch (IOException e) {
                         throw new IllegalArgumentException(CharSequenceUtil.format("{} 请求IO读取失败!", PLUGIN_LIST_URL), e);
+                    }
+                });
+    }
+
+    public static int getPluginTotleSize(PluginList resultPluginList) {
+        return HttpUtil.createGet(PLUGIN_LIST_URL + "&offset=0")
+                .thenFunction(response -> {
+                    try (InputStream is = response.bodyStream()) {
+                        if (!response.isOk()) {
+                            throw new IllegalArgumentException(CharSequenceUtil.format("{} 请求失败! = {}", PLUGIN_LIST_URL, response));
+                        }
+                        String readUtf8 = IoUtil.readUtf8(is);
+                        PluginList currentPluginList = JSONUtil.toBean(readUtf8, PluginList.class);
+                        resultPluginList.getPlugins().addAll(currentPluginList.getPlugins());
+                        resultPluginList.setTotal(resultPluginList.getTotal() + currentPluginList.getPlugins().size());
+                        JSON parse = JSONUtil.parse(readUtf8);
+                        int pluginstotal = (int) parse.getByPath("total");
+                        int total = pluginstotal / PAGE_SIZE;
+                        if (pluginstotal % PAGE_SIZE > 0) {
+                            total = total + 1;
+                        }
+                        return total;
+                    } catch (IOException e) {
+                        log.error(CharSequenceUtil.format("{} 请求IO读取失败!", PLUGIN_LIST_URL + "&offset=0"), e);
+                        return  500;
                     }
                 });
     }
