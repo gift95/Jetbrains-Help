@@ -42,7 +42,7 @@ public class JetbrainsHelpApplication {
         log.info(runSuccessWarn);
     }
 
-    @Scheduled(cron = "0 0 12 * * ?")
+    @Scheduled(cron = "0 0 12 */7 * ?")
     public void refresh() {
         ThreadUtil.execute(PluginsContextHolder::refreshJsonFile);
     }
